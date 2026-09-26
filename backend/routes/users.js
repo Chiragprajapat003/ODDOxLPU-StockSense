@@ -1,5 +1,6 @@
 // routes/users.js — User management (admin only)
 const router  = require('express').Router()
+const { passwordValid, passwordMessage, wrap } = require('../utils/validation')
 const bcrypt  = require('bcryptjs')
 const { body, validationResult } = require('express-validator')
 const { v4: uuidv4 } = require('uuid')
@@ -8,6 +9,7 @@ const { auth, adminOnly } = require('../middleware/auth')
 
 const safeUser = u => ({
   id:         u.id,
+  loginId: u.login_id,
   name:       u.name,
   email:      u.email,
   role:       u.role,
@@ -43,9 +45,9 @@ router.get('/:id', auth, adminOnly, (req, res) => {
 router.post('/', auth, adminOnly, [
   body('name').trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Valid email required').normalizeEmail(),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('password').custom(passwordValid).withMessage(passwordMessage),
   body('role').optional().isIn(['admin','manager','warehouse_staff']).withMessage('Invalid role'),
-], async (req, res) => {
+], wrap(async (req, res) => {
   const errors = validationResult(req)
   if (!errors.isEmpty()) {
     return res.status(400).json({ success: false, message: errors.array()[0].msg })
@@ -55,14 +57,17 @@ router.post('/', auth, adminOnly, [
   if (existing) {
     return res.status(409).json({ success: false, message: 'Email already registered' })
   }
+  if (req.body.loginId && db.prepare('SELECT id FROM users WHERE login_id = ? COLLATE NOCASE').get(req.body.loginId)) return res.status(409).json({success:false,message:'Login ID already registered'})
   const hash   = await bcrypt.hash(password, 12)
   const id     = uuidv4()
+  const loginId = req.body.loginId || `user${id.replace(/-/g,'').slice(0,8)}`
+  if (!/^[a-zA-Z0-9_]{6,12}$/.test(loginId)) return res.status(400).json({success:false,message:'Login ID must be 6–12 letters/numbers/underscores'})
   const avatar = name.slice(0, 2).toUpperCase()
-  db.prepare('INSERT INTO users (id, name, email, password, role, avatar) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, name, email, hash, role, avatar)
+  db.prepare('INSERT INTO users (id, name, email, password, role, avatar, login_id) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(id, name, email, hash, role, avatar, loginId.toLowerCase())
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id)
   res.status(201).json({ success: true, message: 'User created', data: safeUser(user) })
-})
+}))
 
 // ─── PUT /api/users/:id ───────────────────────────────────────────────────────
 router.put('/:id', auth, adminOnly, (req, res) => {
@@ -70,6 +75,8 @@ router.put('/:id', auth, adminOnly, (req, res) => {
   if (!user) return res.status(404).json({ success: false, message: 'User not found' })
 
   const { name, role, is_active } = req.body
+  if (is_active !== undefined && ![0,1].includes(is_active)) return res.status(400).json({success:false,message:'Invalid active status'})
+  if (req.params.id === req.user.id && ((role && role !== 'admin') || is_active === 0)) return res.status(400).json({success:false,message:'You cannot remove your own administrator access'})
   const validRoles = ['admin', 'manager', 'warehouse_staff']
   if (role && !validRoles.includes(role)) {
     return res.status(400).json({ success: false, message: 'Invalid role. Must be: ' + validRoles.join(', ') })
