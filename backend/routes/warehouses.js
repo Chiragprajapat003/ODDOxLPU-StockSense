@@ -54,10 +54,14 @@ router.post('/', auth, managerOrAdmin, [
   }
 
   const { name, location, description } = req.body
+  const shortCode = req.body.shortCode?.trim().toUpperCase()
+  const parentId = req.body.parentId || null
+  if (shortCode && !/^[A-Z0-9]{2,8}$/.test(shortCode)) return res.status(400).json({success:false,message:'Short code needs 2–8 letters/numbers'})
+  if (parentId && !db.prepare('SELECT id FROM warehouses WHERE id = ? AND is_active = 1 AND parent_id IS NULL').get(parentId)) return res.status(400).json({success:false,message:'Select an active parent warehouse'})
   const id = uuidv4()
 
-  db.prepare('INSERT INTO warehouses (id, name, location, description) VALUES (?, ?, ?, ?)')
-    .run(id, name, location, description || null)
+  db.prepare('INSERT INTO warehouses (id, name, location, description, short_code, parent_id) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(id, name, location, description || null, shortCode || `W${id.replace(/-/g,'').slice(0,7).toUpperCase()}`, parentId)
 
   // Initialize stock=0 for all existing products in this new warehouse
   const products = db.prepare('SELECT id FROM products WHERE is_active = 1').all()
@@ -74,6 +78,13 @@ router.put('/:id', auth, managerOrAdmin, (req, res) => {
   if (!wh) return res.status(404).json({ success: false, message: 'Warehouse not found' })
 
   const { name, location, description } = req.body
+  const shortCode = req.body.shortCode?.trim().toUpperCase()
+  const parentId = req.body.parentId || null
+  if (shortCode && !/^[A-Z0-9]{2,8}$/.test(shortCode)) return res.status(400).json({success:false,message:'Short code needs 2–8 letters/numbers'})
+  if (parentId && !db.prepare('SELECT id FROM warehouses WHERE id = ? AND is_active = 1 AND parent_id IS NULL').get(parentId)) return res.status(400).json({success:false,message:'Select an active parent warehouse'})
+  if (req.body.parentId !== undefined && parentId !== wh.parent_id) return res.status(400).json({success:false,message:'The parent warehouse cannot be changed after creation'})
+  if (shortCode && shortCode !== wh.short_code) return res.status(400).json({success:false,message:'Short code is permanent to preserve operation references'})
+  if ((name !== undefined && (typeof name !== 'string' || !name.trim())) || (location !== undefined && (typeof location !== 'string' || !location.trim()))) return res.status(400).json({success:false,message:'Name and address are required'})
   db.prepare(`
     UPDATE warehouses SET
       name        = COALESCE(?, name),
@@ -91,6 +102,11 @@ router.delete('/:id', auth, managerOrAdmin, (req, res) => {
   const wh = db.prepare('SELECT * FROM warehouses WHERE id = ? AND is_active = 1').get(req.params.id)
   if (!wh) return res.status(404).json({ success: false, message: 'Warehouse not found' })
 
+  if (db.prepare('SELECT id FROM warehouses WHERE parent_id = ? AND is_active = 1').get(wh.id)) return res.status(409).json({success:false,message:'Archive child locations first'})
+  for (const table of ['receipts','deliveries','transfers']) {
+    const where = table === 'transfers' ? '(from_warehouse = ? OR to_warehouse = ?)' : 'warehouse_id = ?'
+    if (db.prepare(`SELECT id FROM ${table} WHERE ${where} AND status NOT IN ('done','canceled') LIMIT 1`).get(...(table === 'transfers' ? [wh.id,wh.id] : [wh.id]))) return res.status(409).json({success:false,message:'Warehouse has open operations'})
+  }
   // Check if warehouse has stock
   const hasStock = db.prepare('SELECT SUM(quantity) as total FROM product_stock WHERE warehouse_id = ?').get(req.params.id)
   if (hasStock && hasStock.total > 0) {

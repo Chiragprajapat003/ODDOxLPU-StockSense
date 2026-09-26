@@ -4,6 +4,8 @@ const { body, validationResult } = require('express-validator')
 const { v4: uuidv4 } = require('uuid')
 const db     = require('../db/database')
 const { auth, managerOrAdmin } = require('../middleware/auth')
+const { refreshAvailability, reservedStock } = require('../utils/inventory')
+const { fail, wrap } = require('../utils/validation')
 const { totalStock } = require('../utils/helpers')
 
 // ── Helper: build full product object with stock ──────────────────────────────
@@ -11,11 +13,14 @@ const buildProduct = (product) => {
   const stockRows = db.prepare('SELECT warehouse_id, quantity FROM product_stock WHERE product_id = ?').all(product.id)
   const stock     = {}
   stockRows.forEach(r => { stock[r.warehouse_id] = r.quantity })
-  return { ...product, stock }
+  const freeStock = {}
+  stockRows.forEach(r => { freeStock[r.warehouse_id] = Math.max(0,r.quantity-reservedStock(product.id,r.warehouse_id)) })
+  return { ...product, stock, freeStock, onHand:Object.values(stock).reduce((a,b)=>a+b,0), freeToUse:Object.values(freeStock).reduce((a,b)=>a+b,0) }
 }
 
 // ─── GET /api/products ────────────────────────────────────────────────────────
 router.get('/', auth, (req, res) => {
+  refreshAvailability()
   const { category, search, lowStock } = req.query
   let sql  = 'SELECT * FROM products WHERE is_active = 1'
   const params = []
@@ -57,16 +62,18 @@ router.post('/', auth, managerOrAdmin, [
   }
 
   const { name, sku, category, unit, reorderLevel, description } = req.body
+  const unitCost = Number(req.body.unitCost ?? 0)
+  if (!Number.isFinite(unitCost) || unitCost < 0) return res.status(400).json({success:false,message:"Unit cost must be nonnegative"})
 
   // Unique SKU check
-  const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku)
+  const existing = db.prepare('SELECT id FROM products WHERE sku = ? COLLATE NOCASE').get(sku)
   if (existing) return res.status(409).json({ success: false, message: `SKU "${sku}" already exists` })
 
   const id = uuidv4()
   db.prepare(`
-    INSERT INTO products (id, name, sku, category, unit, reorder_level, description)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, name, sku.toUpperCase(), category, unit, reorderLevel, description || null)
+    INSERT INTO products (id, name, sku, category, unit, reorder_level, description, unit_cost)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, name, sku.toUpperCase(), category, unit, reorderLevel, description || null, unitCost)
 
   // Initialize stock at 0 for all warehouses
   const warehouses = db.prepare('SELECT id FROM warehouses WHERE is_active = 1').all()
@@ -83,7 +90,10 @@ router.put('/:id', auth, managerOrAdmin, (req, res) => {
   if (!product) return res.status(404).json({ success: false, message: 'Product not found' })
 
   const { name, sku, category, unit, reorderLevel, description } = req.body
+  const unitCost = Number(req.body.unitCost ?? 0)
+  if (!Number.isFinite(unitCost) || unitCost < 0) return res.status(400).json({success:false,message:"Unit cost must be nonnegative"})
 
+  if ((reorderLevel !== undefined && (!Number.isSafeInteger(Number(reorderLevel)) || Number(reorderLevel) < 0)) || ['name','sku','category','unit'].some(k => req.body[k] !== undefined && (typeof req.body[k] !== 'string' || !req.body[k].trim()))) return res.status(400).json({success:false,message:'Invalid product fields'})
   // SKU uniqueness check (exclude self)
   if (sku && sku !== product.sku) {
     const conflict = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(sku, product.id)
@@ -97,9 +107,10 @@ router.put('/:id', auth, managerOrAdmin, (req, res) => {
       category      = COALESCE(?, category),
       unit          = COALESCE(?, unit),
       reorder_level = COALESCE(?, reorder_level),
-      description   = COALESCE(?, description)
+      description   = COALESCE(?, description),
+      unit_cost = COALESCE(?, unit_cost)
     WHERE id = ?
-  `).run(name || null, sku ? sku.toUpperCase() : null, category || null, unit || null, reorderLevel ?? null, description ?? null, product.id)
+  `).run(name || null, sku ? sku.toUpperCase() : null, category || null, unit || null, reorderLevel ?? null, description ?? null, req.body.unitCost !== undefined ? unitCost : null, product.id)
 
   const updated = db.prepare('SELECT * FROM products WHERE id = ?').get(product.id)
   res.json({ success: true, message: 'Product updated', data: buildProduct(updated) })
@@ -110,6 +121,10 @@ router.delete('/:id', auth, managerOrAdmin, (req, res) => {
   const product = db.prepare('SELECT * FROM products WHERE id = ? AND is_active = 1').get(req.params.id)
   if (!product) return res.status(404).json({ success: false, message: 'Product not found' })
 
+  if (totalStock(db, product.id) > 0) return res.status(409).json({success:false,message:'Adjust or transfer existing stock before archiving this product'})
+  for (const [table,item,fk] of [['receipts','receipt_items','receipt_id'],['deliveries','delivery_items','delivery_id'],['transfers','transfer_items','transfer_id']]) {
+    if (db.prepare(`SELECT i.id FROM ${item} i JOIN ${table} o ON o.id=i.${fk} WHERE i.product_id=? AND o.status NOT IN ('done','canceled') LIMIT 1`).get(product.id)) return res.status(409).json({success:false,message:'Product is used by an open operation'})
+  }
   // Soft delete
   db.prepare('UPDATE products SET is_active = 0 WHERE id = ?').run(product.id)
   res.json({ success: true, message: `Product "${product.name}" deleted` })
