@@ -8,7 +8,8 @@ const getTransporter = () => {
 
   // Support multiple SMTP providers: Gmail, Outlook, custom SMTP
   const smtpConfig = {
-    host:   process.env.SMTP_HOST || 'smtp.gmail.com',
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
     port:   parseInt(process.env.SMTP_PORT || '587'),
     secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
     auth: {
@@ -16,7 +17,7 @@ const getTransporter = () => {
       pass: process.env.SMTP_PASS,
     },
     tls: {
-      rejectUnauthorized: false,  // for self-signed certs in dev
+      rejectUnauthorized: true,  // for self-signed certs in dev
     },
   }
 
@@ -28,7 +29,7 @@ const getTransporter = () => {
 const verifyConnection = async () => {
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS ||
       process.env.SMTP_USER === 'your_email@gmail.com') {
-    console.warn('⚠️  SMTP not configured — OTP emails will use dev mode fallback')
+    console.warn('⚠️  SMTP not configured — OTP delivery is unavailable')
     return false
   }
   try {
@@ -118,10 +119,10 @@ const sendOTPEmail = async (to, otp, name = 'User') => {
   const t = getTransporter()
 
   const info = await t.sendMail({
-    from:    process.env.EMAIL_FROM || 'CoreInventory <noreply@coreinventory.com>',
+    from:    process.env.EMAIL_FROM || `CoreInventory <${process.env.SMTP_USER}>`,
     to,
-    subject: `${otp} is your CoreInventory password reset OTP`,
-    html:    buildOTPHtml(otp, name, expires),
+    subject: 'Your CoreInventory verification code',
+    html: buildOTPHtml(otp, name.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])), expires),
     text:    [
       'CoreInventory - Password Reset OTP',
       '-----------------------------------',
@@ -137,7 +138,7 @@ const sendOTPEmail = async (to, otp, name = 'User') => {
     ].join('\n'),
   })
 
-  console.log('📧  OTP email sent to', to, '| MessageId:', info.messageId)
+  if (!info.accepted?.length || info.rejected?.length) throw new Error('SMTP rejected recipient')
   return info
 }
 

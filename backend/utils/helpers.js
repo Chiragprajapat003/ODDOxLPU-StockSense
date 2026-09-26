@@ -5,18 +5,22 @@ const { v4: uuidv4 } = require('uuid')
 const makeId = (prefix = '') => prefix + uuidv4().replace(/-/g, '').slice(0, 12)
 
 // Today's date as YYYY-MM-DD
-const toDay = () => new Date().toISOString().split('T')[0]
+const toDay = () => new Intl.DateTimeFormat('en-CA', {timeZone:process.env.INVENTORY_TIMEZONE || 'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
 
 // Generate a 6-digit numeric OTP
-const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString()
+const generateOTP = () => require('crypto').randomInt(100000, 1000000).toString()
 
 // Generate next reference number (e.g. RCT-005)
-const nextRef = (db, table, column, prefix) => {
-  const row = db.prepare(`SELECT ${column} FROM ${table} WHERE ${column} LIKE '${prefix}-%' ORDER BY ${column} DESC LIMIT 1`).get()
-  if (!row) return `${prefix}-001`
-  const match = row[column].match(/(\d+)$/)
-  const num = match ? parseInt(match[1]) + 1 : 1
-  return `${prefix}-${String(num).padStart(3, '0')}`
+const nextRef = (db, table, column, code, warehouseId) => {
+  const op = { RCT:'IN', DLV:'OUT', TRF:'INT', ADJ:'ADJ' }[code]
+  if (!op || !['receipts','deliveries','transfers','adjustments'].includes(table) || column !== 'ref') throw new Error('Invalid reference sequence')
+  const wh = warehouseId && db.prepare('SELECT short_code FROM warehouses WHERE id = ?').get(warehouseId)
+  const prefix = `${wh?.short_code || 'WH'}/${op}`
+  const existing = db.prepare(`SELECT ref FROM ${table} WHERE ref LIKE ?`).all(`${prefix}/%`)
+  const max = existing.reduce((n, r) => Math.max(n, Number(r.ref.match(/(\d+)$/)?.[1] || 0)), 0)
+  const row = db.prepare(`INSERT INTO reference_sequences(prefix, value) VALUES (?, ?)
+    ON CONFLICT(prefix) DO UPDATE SET value = MAX(reference_sequences.value, ?) + 1 RETURNING value`).get(prefix, max + 1, max)
+  return `${prefix}/${String(row.value).padStart(4, '0')}`
 }
 
 // Compute total stock across all warehouses for a product
@@ -34,7 +38,8 @@ const warehouseStock = (db, productId, warehouseId) => {
 // Upsert stock: add delta to product_stock row
 const adjustStock = (db, productId, warehouseId, delta) => {
   const current = warehouseStock(db, productId, warehouseId)
-  const newQty  = Math.max(0, current + delta)
+  const newQty = current + Number(delta)
+  if (!Number.isSafeInteger(newQty) || newQty < 0) throw Object.assign(new Error('Insufficient stock or invalid quantity'), { status: 409 })
   db.prepare(`
     INSERT INTO product_stock (product_id, warehouse_id, quantity, updated_at)
     VALUES (?, ?, ?, datetime('now'))
