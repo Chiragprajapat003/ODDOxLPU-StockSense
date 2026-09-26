@@ -32,18 +32,13 @@ export default function ManagerDashboard({ s, refresh }) {
   const pieData = Object.entries(byCat).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value }))
 
   /* ── Operations summary for bar chart ── */
-  const opsData = WEEK.map((day) => ({
-    day,
-    receipts:   Math.floor(Math.random() * 8 + 2),
-    deliveries: Math.floor(Math.random() * 6 + 1),
-    transfers:  Math.floor(Math.random() * 4 + 1),
-  }))
+  const opsData = (s.dashboard?.movementTrend||[]).map(r=>({...r,day:fDate(r.date)}))
 
   /* ── Top moving products ── */
   const productMovements = {}
   movements.forEach(m => {
     if (!productMovements[m.productId]) productMovements[m.productId] = 0
-    productMovements[m.productId] += m.qty
+    productMovements[m.productId] += Math.abs(m.qty)
   })
   const topProducts = Object.entries(productMovements)
     .map(([id, qty]) => ({ name: prodName(s.products, id), qty }))

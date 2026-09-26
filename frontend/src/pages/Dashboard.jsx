@@ -3,18 +3,10 @@ import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tool
 import { Ico, Bdg, CT, ExportCSV } from '../components/UI.jsx'
 import { totalStock, stockStatus, prodName, whName, fNum, fDate, toDay } from '../store/index.js'
 
-const TREND = [
-  { name: 'Mon', receipts: 45, deliveries: 20 },
-  { name: 'Tue', receipts: 32, deliveries: 38 },
-  { name: 'Wed', receipts: 64, deliveries: 28 },
-  { name: 'Thu', receipts: 25, deliveries: 42 },
-  { name: 'Fri', receipts: 58, deliveries: 36 },
-  { name: 'Sat', receipts: 39, deliveries: 18 },
-  { name: 'Sun', receipts: 30, deliveries: 24 },
-]
 const PIE_CLR = ['#00f0ff', '#10b981', '#a78bfa', '#f59e0b', '#f43f5e', '#38bdf8', '#818cf8']
 
 export default function Dashboard({ s }) {
+  const TREND = (s.dashboard?.movementTrend||[]).map(r=>({...r,name:fDate(r.date)}))
   const { products, receipts, deliveries, transfers, movements } = s
 
   const totalUnits = products.reduce((a,p) => a + totalStock(p), 0)
@@ -34,8 +26,8 @@ export default function Dashboard({ s }) {
   const KPIS = [
     { label:'Total SKU Products', val:products.length, sub:`${fNum(totalUnits)} inventory units`, cls:'kc', ic:'box',     icColor:'var(--cy)', icBg:'var(--cyd)' },
     { label:'Critical Stock Alerts', val:out.length+low.length, sub:`${out.length} out · ${low.length} low`, cls:'kr', ic:'alert', icColor:'var(--rd)', icBg:'var(--rdd)', valColor:'var(--rd)' },
-    { label:'Pending Receipts', val:pRcpt, sub:`${receipts.filter(r=>r.status==='done').length} received`, cls:'ka', ic:'inbox', icColor:'var(--am)', icBg:'var(--amd)', valColor:'var(--am)' },
-    { label:'Pending Shipments', val:pDlv, sub:`${deliveries.filter(d=>d.status==='done').length} dispatched`, cls:'kg', ic:'send', icColor:'var(--gn)', icBg:'var(--gnd)', valColor:'var(--gn)' },
+    { label:'Pending Receipts', val:pRcpt, sub:`${receipts.filter(r=>r.status==='done').length} received · ${s.dashboard?.operationCounts?.receipts?.late||0} late · ${s.dashboard?.operationCounts?.receipts?.waiting||0} waiting`, cls:'ka', ic:'inbox', icColor:'var(--am)', icBg:'var(--amd)', valColor:'var(--am)' },
+    { label:'Pending Shipments', val:pDlv, sub:`${deliveries.filter(d=>d.status==='done').length} dispatched · ${s.dashboard?.operationCounts?.deliveries?.late||0} late · ${s.dashboard?.operationCounts?.deliveries?.waiting||0} waiting`, cls:'kg', ic:'send', icColor:'var(--gn)', icBg:'var(--gnd)', valColor:'var(--gn)' },
     { label:'Internal Transfers', val:pTrf, sub:`${transfers.filter(t=>t.status==='done').length} completed`, cls:'kp', ic:'arrow', icColor:'var(--pu)', icBg:'var(--pud)', valColor:'var(--pu)' },
   ]
 
@@ -109,7 +101,7 @@ export default function Dashboard({ s }) {
           <div className="fcb" style={{ marginBottom: 14 }}>
             <div>
               <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 14, color: 'var(--t0)' }}>Inbound vs Outbound Velocity</div>
-              <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 2 }}>Daily transaction throughput for the current week</div>
+              <div style={{ fontSize: 11, color: 'var(--t2)', marginTop: 2 }}>{s.dashboard?.trendRange ? `Movement quantities · ${s.dashboard.trendRange.from} to ${s.dashboard.trendRange.to}` : 'Movement quantities from the stock ledger'}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 11 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
