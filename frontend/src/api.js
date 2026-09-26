@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const BASE = import.meta.env.VITE_API_URL || '/api'
 
 // ── Token storage ─────────────────────────────────────────────────────────────
 export const getToken  = ()      => localStorage.getItem('ci_token')
@@ -18,7 +18,7 @@ const req = async (method, path, body) => {
   }
   const res  = await fetch(`${BASE}${path}`, opts)
   const data = await res.json()
-  if (!res.ok) throw new Error(data.message || 'Request failed')
+  if (!res.ok) { const error = new Error(data.message || 'Request failed'); error.status = res.status; error.details = data.details; throw error }
   return data
 }
 
@@ -29,11 +29,13 @@ const del    = (path)        => req('DELETE', path)
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const authAPI = {
-  login:   (email, password)          => post('/auth/login',   { email, password }),
-  signup:  (name, email, password)    => post('/auth/signup',  { name, email, password }),
+  login: (loginId, password) => post('/auth/login', { loginId, password }),
+  signup: data => post('/auth/signup', data),
+  sendPhoneOtp: data => post('/auth/phone/send', data),
+  verifyPhoneOtp: data => post('/auth/phone/verify', data),
   me:      ()                         => get('/auth/me'),
-  sendOtp: (email)                    => post('/auth/otp/send',   { email }),
-  verifyOtp: (email, code)            => post('/auth/otp/verify', { email, code }),
+  sendOtp: data => post('/auth/otp/send', data),
+  verifyOtp: data => post('/auth/otp/verify', data),
   resetPass: (resetToken, newPassword) => post('/auth/otp/reset', { resetToken, newPassword }),
   updateProfile: (data)               => put('/auth/profile', data),
   changePassword: (currentPassword, newPassword) => put('/auth/password', { currentPassword, newPassword }),
@@ -41,7 +43,7 @@ export const authAPI = {
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export const dashboardAPI = { 
-  get: () => get('/dashboard'),
+  get: (params={}) => get(`/dashboard?${new URLSearchParams(params)}`),
 }
 
 // ─── Products ─────────────────────────────────────────────────────────────────
@@ -70,18 +72,21 @@ export const receiptsAPI = {
   create:   (data)        => post('/receipts', data),
   update:   (id, data)    => put(`/receipts/${id}`, data),
   delete:   (id)          => del(`/receipts/${id}`),
-  validate: (id)          => post(`/receipts/${id}/validate`),
+  ready: id => post(`/receipts/${id}/ready`),
+  validate: (id) => post(`/receipts/${id}/validate`),
   cancel:   (id)          => post(`/receipts/${id}/cancel`),
 }
 
 // ─── Deliveries ───────────────────────────────────────────────────────────────
 export const deliveriesAPI = {
+  fulfillment: (id, stage) => post(`/deliveries/${id}/fulfillment`, {stage}),
   list:     (params = {}) => get(`/deliveries?${new URLSearchParams(params)}`),
   get:      (id)          => get(`/deliveries/${id}`),
   create:   (data)        => post('/deliveries', data),
   update:   (id, data)    => put(`/deliveries/${id}`, data),
   delete:   (id)          => del(`/deliveries/${id}`),
-  validate: (id)          => post(`/deliveries/${id}/validate`),
+  ready: id => post(`/deliveries/${id}/ready`),
+  validate: (id) => post(`/deliveries/${id}/validate`),
   cancel:   (id)          => post(`/deliveries/${id}/cancel`),
 }
 
@@ -92,7 +97,8 @@ export const transfersAPI = {
   create:   (data)        => post('/transfers', data),
   update:   (id, data)    => put(`/transfers/${id}`, data),
   delete:   (id)          => del(`/transfers/${id}`),
-  validate: (id)          => post(`/transfers/${id}/validate`),
+  ready: id => post(`/transfers/${id}/ready`),
+  validate: (id) => post(`/transfers/${id}/validate`),
   cancel:   (id)          => post(`/transfers/${id}/cancel`),
 }
 
@@ -105,6 +111,11 @@ export const adjustmentsAPI = {
 
 // ─── Stock Movements ─────────────────────────────────────────────────────────
 export const movementsAPI = {
+  all: async () => {
+    const data = []; let page = 1, pages = 1;
+    do { const result = await get(`/movements?limit=200&page=${page}`); data.push(...result.data); pages = result.pages; page += 1 } while (page <= pages);
+    return { data };
+  },
   list:    (params = {}) => get(`/movements?${new URLSearchParams(params)}`),
   summary: (days = 30)   => get(`/movements/summary?days=${days}`),
 }
