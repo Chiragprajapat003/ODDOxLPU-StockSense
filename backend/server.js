@@ -1,6 +1,6 @@
 // server.js — CoreInventory Express Backend
 // Run: npm install && npm run seed && npm run dev
-require('dotenv').config()
+require('./config')
 
 const express     = require('express')
 const cors        = require('cors')
@@ -35,15 +35,13 @@ app.use(cors({
     // Allowed exact origins
     const allowed = [
       process.env.FRONTEND_URL,
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:4173',
+      ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173','http://localhost:3000','http://localhost:4173']),
     ].filter(Boolean)
 
-    if (allowed.includes(origin) || origin.endsWith('.vercel.app')) {
+    if (allowed.includes(origin)) {
       return callback(null, true)
     }
-    return callback(null, true)
+    return callback(Object.assign(new Error('Origin not allowed'), {status:403}))
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -51,7 +49,7 @@ app.use(cors({
 }))
 
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '256kb' }))
 app.use(express.urlencoded({ extended: true }))
 
 // ─── Logging ──────────────────────────────────────────────────────────────────
@@ -62,7 +60,7 @@ if (process.env.NODE_ENV !== 'test') {
 // ─── Global Rate Limiting ─────────────────────────────────────────────────────
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,   // 15 minutes
-  max:      500,
+  max:      2000,
   message:  { success: false, message: 'Too many requests, please slow down.' },
   standardHeaders: true,
   legacyHeaders:   false,
@@ -70,14 +68,15 @@ const globalLimiter = rateLimit({
 app.use('/api/', globalLimiter)
 
 // Stricter limiter for auth endpoints
-const authLimiter = rateLimit({
+const authLimiter = () => rateLimit({
   windowMs: 15 * 60 * 1000,
   max:      20,
   message:  { success: false, message: 'Too many auth attempts, please try again later.' },
 })
-app.use('/api/auth/login',      authLimiter)
-app.use('/api/auth/signup',     authLimiter)
-app.use('/api/auth/otp',        authLimiter)
+app.use('/api/auth/login',      authLimiter())
+app.use('/api/auth/signup',     authLimiter())
+app.use('/api/auth/otp', authLimiter())
+app.use('/api/auth/phone', authLimiter())
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
@@ -163,6 +162,13 @@ app.get('/api', (req, res) => {
   })
 })
 
+// Serve the built frontend from the API origin in production.
+if (process.env.NODE_ENV === 'production') {
+  const dist = path.join(__dirname, '../dist')
+  app.use(express.static(dist))
+  app.get('*', (req, res, next) => req.path.startsWith('/api') ? next() : res.sendFile(path.join(dist,'index.html')))
+}
+
 // ─── 404 Handler ──────────────────────────────────────────────────────────────
 app.use((req, res) => {
   res.status(404).json({ success: false, message: `Route ${req.method} ${req.path} not found` })
@@ -170,17 +176,17 @@ app.use((req, res) => {
 
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error('❌ Unhandled error:', err)
+  if (!err.status || err.status >= 500) console.error('Request failed:', err.code || err.message)
 
   // SQLite constraint errors
-  if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+  if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/.test(err.message)) {
     return res.status(409).json({ success: false, message: 'A record with that value already exists' })
   }
 
   res.status(err.status || 500).json({
     success: false,
-    message: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
+    message: err.status && err.status < 500 ? err.message : (err.status === 503 ? err.message : 'Internal server error'),
+
   })
 })
 
@@ -188,32 +194,8 @@ app.use((err, req, res, next) => {
 const { verifyConnection } = require('./utils/email')
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
-  console.log('')
-  console.log('  ╔═══════════════════════════════════════════╗')
-  console.log('  ║       CoreInventory Backend v2.0.0        ║')
-  console.log('  ╚═══════════════════════════════════════════╝')
-  console.log('')
-  console.log(`  🚀  Server running at   http://localhost:${PORT}`)
-  console.log(`  📦  API base URL        http://localhost:${PORT}/api`)
-  console.log(`  ❤️   Health check        http://localhost:${PORT}/health`)
-  console.log(`  🌍  Environment         ${process.env.NODE_ENV || 'development'}`)
-  console.log('')
-  console.log('  Default test accounts:')
-  console.log('  admin@coreinventory.com   / admin123   (Administrator)')
-  console.log('  manager@coreinventory.com / manager123 (Manager)')
-  console.log('  staff@coreinventory.com   / staff123   (Warehouse Staff)')
-  console.log('')
-
-  // Verify SMTP on startup
-  const smtpOk = await verifyConnection()
-  if (smtpOk) {
-    console.log('  📧  Email (SMTP)        CONNECTED — OTP emails will be sent')
-  } else {
-    console.log('  📧  Email (SMTP)        NOT CONFIGURED — using dev mode OTP fallback')
-    console.log('      → Set SMTP_USER and SMTP_PASS in backend/.env to enable real emails')
-  }
-  console.log('')
+if (require.main === module) app.listen(PORT, async () => {
+  console.log(`CoreInventory API listening at http://localhost:${PORT}`)
+  console.log(await verifyConnection() ? 'SMTP connected' : 'SMTP unavailable: configure backend/.env for email OTP')
 })
-
 module.exports = app
