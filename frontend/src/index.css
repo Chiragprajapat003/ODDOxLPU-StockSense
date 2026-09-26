@@ -911,3 +911,22 @@ select.inp {
   .grid5, .grid4 { grid-template-columns: 1fr; }
   .phd { flex-direction: column; align-items: flex-start; gap: 12px; }
 }
+.operation-print-root { display: none; }
+@media print {
+  body > * { display: none !important; }
+  body > .operation-print-root { display: block !important; color: #111; background: white; padding: 20px; }
+  .operation-print-root * { color: #111 !important; background: white !important; }
+  .operation-print-root table { width: 100%; border-collapse: collapse; }
+  .operation-print-root td, .operation-print-root th { border-bottom: 1px solid #bbb; padding: 10px; text-align: left; }
+  .operation-print-root tr { break-inside: avoid; }
+}
+.mobile-menu { display: none; }
+.mobile-backdrop { display: none; }
+.content { min-width: 0; }
+.grid2 > *, .grid3 > *, .grid4 > *, .grid5 > * { min-width: 0; }
+@media (max-width: 900px) {
+  .mobile-menu { display: inline-flex; }
+  .mobile-backdrop { display: block; position: fixed; inset: 0; z-index: 98; background: #0008; border: 0; }
+  .content { width: 100%; }
+  .content > .glass-panel { flex-wrap: wrap; gap: 10px; }
+}

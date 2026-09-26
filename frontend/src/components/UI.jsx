@@ -58,7 +58,7 @@ export const Ico = ({ n, size=15, color='currentColor', stroke=1.9, ...p }) => (
 
 // ── Badge ─────────────────────────────────────────────────────────────────────
 const STATUS_MAP = { draft:'bd', waiting:'bw', ready:'brd', done:'bdn', canceled:'bc', low:'blow', out:'bout', ok:'bok' }
-const STATUS_LBL = { draft:'Draft', waiting:'Waiting', ready:'Ready', done:'Completed', canceled:'Canceled', low:'Low Stock', out:'Out of Stock', ok:'In Stock' }
+const STATUS_LBL = { draft:'Draft', waiting:'Waiting', ready:'Ready', done:'Done', canceled:'Canceled', low:'Low Stock', out:'Out of Stock', ok:'In Stock' }
 const STATUS_IC  = { draft:'edit', waiting:'refresh', ready:'sparkles', done:'check', canceled:'x', low:'alert', out:'xCircle', ok:'checkCircle' }
 
 export const Bdg = ({ s }) => (
@@ -109,7 +109,7 @@ export const Modal = ({ title, onClose, children, footer, wide }) => {
 
   return (
     <div className="overlay" onClick={e => { if (e.target===e.currentTarget) onClose() }}>
-      <div className="modal" style={wide ? {maxWidth:680} : {}}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title} style={wide ? {maxWidth:680} : {}}>
         <div className="mhd">
           <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--cy)', boxShadow: '0 0 10px var(--cy)' }}/>
@@ -242,8 +242,8 @@ export const ItemEditor = ({ items, setItems, products, warehouseId, type }) => 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.map((it, i) => {
           const p = products.find(x => x.id===it.productId)
-          const avail = (type==='delivery' || type==='transfer') ? ((p?.stock||{})[warehouseId]||0) : null
-          const isShort = avail !== null && avail < it.qty
+          const avail = (type==='delivery' || type==='transfer') ? ((p?.freeStock||p?.stock||{})[warehouseId]||0) : null
+          const isShort = avail !== null && avail < items.filter(row=>row.productId===it.productId).reduce((sum,row)=>sum+Number(row.qty),0)
 
           return (
             <div key={i} style={{
