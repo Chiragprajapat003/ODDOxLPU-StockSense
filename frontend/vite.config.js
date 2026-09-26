@@ -6,12 +6,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    rollupOptions: { output: { manualChunks: { charts: ['recharts'], react: ['react','react-dom'] } } },
   },
   server: {
     port: 5173,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: process.env.API_PROXY_TARGET || 'http://localhost:5000',
         changeOrigin: true,
       }
     }

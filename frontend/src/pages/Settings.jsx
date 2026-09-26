@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Ico, Modal, toast, ExportCSV, FilterPills } from '../components/UI.jsx'
 import { fNum, fDate, prodName, whName } from '../store/index.js'
-import { adjustmentsAPI, warehousesAPI, authAPI } from '../api.js'
+import { adjustmentsAPI, warehousesAPI, authAPI, setToken } from '../api.js'
 
 // ── Adjustments ───────────────────────────────────────────────────────────────
 export function Adjustments({ s, refresh }) {
@@ -171,7 +171,7 @@ export function History({ s }) {
 
   const filtered = movements.filter(m => {
     const matchType = type === 'all' || m.type === type
-    const matchQ    = !q || prodName(products, m.productId).toLowerCase().includes(q.toLowerCase()) || m.ref?.toLowerCase().includes(q.toLowerCase())
+    const matchQ    = !q || prodName(products, m.productId).toLowerCase().includes(q.toLowerCase()) || m.ref?.toLowerCase().includes(q.toLowerCase()) || m.contact?.toLowerCase().includes(q.toLowerCase())
     return matchType && matchQ
   })
 
@@ -228,7 +228,7 @@ export function History({ s }) {
               <th style={{ textAlign: 'right' }}>Quantity</th>
               <th>Origin Hub</th>
               <th>Destination Hub</th>
-              <th>Reference</th>
+              <th>Contact</th><th>Reference / Status</th>
             </tr>
           </thead>
           <tbody>
@@ -248,14 +248,14 @@ export function History({ s }) {
                 <td className="mono" style={{ textAlign: 'right', color: m.qty > 0 ? 'var(--gn)' : m.qty < 0 ? 'var(--rd)' : 'var(--t1)', fontWeight: 800 }}>
                   {m.qty > 0 ? `+${fNum(m.qty)}` : fNum(m.qty)}
                 </td>
-                <td style={{ color: 'var(--t2)' }}>{m.from === '-' ? '—' : whName(warehouses, m.from)}</td>
-                <td style={{ color: 'var(--t2)' }}>{m.to === '-' ? '—' : whName(warehouses, m.to)}</td>
-                <td className="mono" style={{ color: 'var(--cy)', fontWeight: 700 }}>{m.ref || '—'}</td>
+                <td style={{ color: 'var(--t2)' }}>{m.from === '-' ? (m.type==='receipt'?m.contact:'—') : whName(warehouses, m.from)}</td>
+                <td style={{ color: 'var(--t2)' }}>{m.to === '-' ? (m.type==='delivery'?m.contact:'—') : whName(warehouses, m.to)}</td>
+                <td>{m.contact || 'Internal'}</td><td className="mono" style={{ color: 'var(--cy)', fontWeight: 700 }}>{m.ref || '—'}<div style={{fontSize:10,color:'var(--t2)'}}>Done</div></td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   <div className="empty" style={{ padding: 48 }}>
                     <Ico n="list" size={36} color="var(--b1)"/>
                     <span style={{ color: 'var(--t0)', fontWeight: 700, marginTop: 8 }}>No movement records found</span>
@@ -276,15 +276,15 @@ export function Warehouses({ s, refresh }) {
   const { warehouses, products } = s
   const [modal, setModal] = useState(null)
   const [busy,  setBusy]  = useState(false)
-  const [f, setF] = useState({ name:'', location:'' })
+  const [f, setF] = useState({ name:'', location:'', shortCode:'', parentId:'' })
   const fh = e => setF(x => ({ ...x, [e.target.name]: e.target.value }))
 
   const save = async () => {
     if (!f.name) return toast('Facility name is required','e')
     setBusy(true)
     try {
-      if (modal==='add') { await warehousesAPI.create({ name:f.name, location:f.location }); toast('Warehouse facility registered!') }
-      else               { await warehousesAPI.update(modal.edit.id, { name:f.name, location:f.location }); toast('Warehouse updated!') }
+      if (modal==='add') { await warehousesAPI.create({ name:f.name, location:f.location, shortCode:f.shortCode, parentId:f.parentId }); toast('Warehouse facility registered!') }
+      else               { await warehousesAPI.update(modal.edit.id, { name:f.name, location:f.location, shortCode:f.shortCode, parentId:f.parentId }); toast('Warehouse updated!') }
       setModal(null); await refresh()
     } catch(err) { toast(err.message,'e') } finally { setBusy(false) }
   }
@@ -304,7 +304,7 @@ export function Warehouses({ s, refresh }) {
           <div className="pt">Warehouse Network & Facilities</div>
           <div className="ps">{warehouses.length} active logistical hubs configured</div>
         </div>
-        <button className="btn bp" onClick={()=>{setF({name:'',location:''});setModal('add')}}><Ico n="plus" size={14}/>Add Facility</button>
+        <button className="btn bp" onClick={()=>{setF({name:'',location:'',shortCode:'',parentId:''});setModal('add')}}><Ico n="plus" size={14}/>Add Facility</button>
       </div>
 
       <div className="grid3 au d1">
@@ -322,7 +322,7 @@ export function Warehouses({ s, refresh }) {
                   <Ico n="warehouse" size={20} color="var(--cy)"/>
                 </div>
                 <div className="fc g2">
-                  <button className="btn bs bnr bsm" onClick={()=>{setF({name:w.name,location:w.location});setModal({edit:w})}} title="Edit warehouse"><Ico n="edit" size={13}/></button>
+                  <button className="btn bs bnr bsm" onClick={()=>{setF({name:w.name,location:w.location,shortCode:w.short_code||'',parentId:w.parent_id||''});setModal({edit:w})}} title="Edit warehouse"><Ico n="edit" size={13}/></button>
                   {warehouses.length > 1 && <button className="btn br bnr bsm" onClick={()=>del(w.id)} title="Delete warehouse"><Ico n="trash" size={13}/></button>}
                 </div>
               </div>
@@ -331,7 +331,7 @@ export function Warehouses({ s, refresh }) {
               </div>
               <div className="fc g2" style={{ marginBottom: 16 }}>
                 <Ico n="tag" size={12} color="var(--t2)"/>
-                <span style={{ fontSize: 12, color: 'var(--t2)', fontWeight: 600 }}>{w.location || 'Central Location'}</span>
+                <span style={{ fontSize: 12, color: 'var(--t2)', fontWeight: 600 }}>{w.short_code} · {w.location || 'Central Location'}{w.parent_id ? ` · ${whName(warehouses,w.parent_id)}` : ''}</span>
               </div>
               <div className="cgl" style={{ marginBottom: 14 }}/>
               <div className="fcb">
@@ -363,6 +363,7 @@ export function Warehouses({ s, refresh }) {
             </>
           }
         >
+          <div className="grid2"><div className="fg"><label className="lbl">Short Code</label><input className="inp" name="shortCode" value={f.shortCode||''} onChange={fh} disabled={modal!=='add'} placeholder="WH / RACKA"/></div><div className="fg"><label className="lbl">Parent Warehouse (for a location)</label><select className="inp" name="parentId" value={f.parentId||''} onChange={fh} disabled={modal!=='add'}><option value="">Standalone warehouse</option>{warehouses.filter(w=>!w.parent_id).map(w=><option key={w.id} value={w.id}>{w.name}</option>)}</select></div></div>
           <div className="fg">
             <label className="lbl">Warehouse / Facility Name *</label>
             <input className="inp" name="name" value={f.name} onChange={fh} placeholder="e.g. North Terminal Logistics Hub"/>
@@ -379,6 +380,8 @@ export function Warehouses({ s, refresh }) {
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 export function Profile({ user, setUser }) {
+  const [phone,setPhone]=useState(user?.phone||''), [phoneCode,setPhoneCode]=useState(''), [phonePassword,setPhonePassword]=useState(''), [phoneBusy,setPhoneBusy]=useState(false)
+  const phoneAction=async(verify)=>{if(phoneBusy)return;setPhoneBusy(true);try{const res=verify?await authAPI.verifyPhoneOtp({phone,code:phoneCode}):await authAPI.sendPhoneOtp({phone,currentPassword:phonePassword});if(verify)setUser(u=>({...u,phone:res.user.phone}));toast(verify?'WhatsApp recovery number verified':res.message)}catch(e){toast(e.message,'e')}finally{setPhoneBusy(false)}}
   const [f, setF] = useState({ name:user?.name||'', email:user?.email||'', role:user?.role||'', current:'', newPass:'', confirmPass:'' })
   const fh = e => setF(x => ({ ...x, [e.target.name]: e.target.value }))
 
@@ -393,9 +396,10 @@ export function Profile({ user, setUser }) {
   const savePass = async () => {
     if (!f.current)                  return toast('Enter your current password','e')
     if (f.newPass !== f.confirmPass) return toast('New passwords do not match','e')
-    if (f.newPass.length < 6)        return toast('Password must be at least 6 characters','e')
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*[^a-zA-Z0-9\s]).{9,}/.test(f.newPass)) return toast('Use 9+ characters with uppercase, lowercase and special character','e')
     try {
-      await authAPI.changePassword(f.current, f.newPass)
+      const result = await authAPI.changePassword(f.current, f.newPass)
+      setToken(result.token)
       toast('Security credentials updated successfully!')
       setF(x => ({ ...x, current:'', newPass:'', confirmPass:'' }))
     } catch(err) { toast(err.message,'e') }
@@ -430,6 +434,7 @@ export function Profile({ user, setUser }) {
               </div>
             </div>
             <div className="cgl" style={{ marginBottom: 16 }}/>
+            <div className="fg"><label className="lbl">Login ID</label><input className="inp" value={user?.loginId||''} readOnly/></div>
             <div className="fg">
               <label className="lbl">Full Display Name</label>
               <input className="inp" name="name" value={f.name} onChange={fh}/>
@@ -449,6 +454,7 @@ export function Profile({ user, setUser }) {
         </div>
 
         <div>
+          <div className="card cp" style={{padding:24,marginBottom:16}}><h3>WhatsApp password recovery</h3><p>{user?.phone?`Verified: ${user.phone}`:'Verify a number you own to enable WhatsApp recovery.'}</p><label className="lbl">Phone with country code</label><input className="inp" type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+919876543210"/><label className="lbl">Current password</label><input className="inp" type="password" value={phonePassword} onChange={e=>setPhonePassword(e.target.value)}/><button className="btn bs" disabled={phoneBusy} onClick={()=>phoneAction(false)}>Send WhatsApp code</button><label className="lbl">Verification code</label><input className="inp" value={phoneCode} onChange={e=>setPhoneCode(e.target.value)} maxLength={6} inputMode="numeric"/><button className="btn bp" disabled={phoneBusy} onClick={()=>phoneAction(true)}>Verify & link number</button></div>
           <div className="card cp au d2" style={{ padding: 24, marginBottom: 16 }}>
             <div style={{ fontFamily: 'Syne, sans-serif', fontWeight: 800, fontSize: 15, color: 'var(--t0)', marginBottom: 16 }}>
               Update Password
@@ -459,7 +465,7 @@ export function Profile({ user, setUser }) {
             </div>
             <div className="fg">
               <label className="lbl">New Password</label>
-              <input className="inp" name="newPass" type="password" value={f.newPass} onChange={fh} placeholder="Minimum 6 characters"/>
+              <input className="inp" name="newPass" type="password" value={f.newPass} onChange={fh} placeholder="9+ chars, uppercase, lowercase, special character"/>
             </div>
             <div className="fg">
               <label className="lbl">Confirm New Password</label>

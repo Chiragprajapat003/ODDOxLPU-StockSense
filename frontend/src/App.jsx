@@ -10,15 +10,15 @@ import Products from './pages/Products.jsx'
 import { Receipts, Deliveries, Transfers } from './pages/Operations.jsx'
 import { Adjustments, History, Warehouses, Profile } from './pages/Settings.jsx'
 import { reducer, INIT, stockStatus, totalStock, fNum } from './store/index.js'
-import { authAPI, getToken, setToken, clearToken, productsAPI, warehousesAPI, receiptsAPI, deliveriesAPI, transfersAPI, adjustmentsAPI, movementsAPI } from './api.js'
+import { authAPI, getToken, setToken, clearToken, productsAPI, warehousesAPI, receiptsAPI, deliveriesAPI, transfersAPI, adjustmentsAPI, movementsAPI, dashboardAPI } from './api.js'
 
-const mapProduct    = p => ({ id:p.id, name:p.name, sku:p.sku, category:p.category, unit:p.unit, reorderLevel:p.reorder_level||p.reorderLevel||0, stock:p.stock||{}, createdAt:p.created_at||p.createdAt })
-const mapWarehouse  = w => ({ id:w.id, name:w.name, location:w.location, description:w.description })
-const mapReceipt    = r => ({ id:r.id, ref:r.ref, supplier:r.supplier, warehouse:r.warehouse_id||r.warehouse, status:r.status, date:r.date, notes:r.notes, items:(r.items||[]).map(i=>({ productId:i.product_id||i.productId, qty:i.qty })) })
-const mapDelivery   = d => ({ id:d.id, ref:d.ref, customer:d.customer, warehouse:d.warehouse_id||d.warehouse, status:d.status, date:d.date, notes:d.notes, items:(d.items||[]).map(i=>({ productId:i.product_id||i.productId, qty:i.qty })) })
-const mapTransfer   = t => ({ id:t.id, ref:t.ref, from:t.from_warehouse||t.from, to:t.to_warehouse||t.to, status:t.status, date:t.date, notes:t.notes, items:(t.items||[]).map(i=>({ productId:i.product_id||i.productId, qty:i.qty })) })
-const mapAdjustment = a => ({ id:a.id, ref:a.ref, productId:a.product_id||a.productId, warehouse:a.warehouse_id||a.warehouse, oldQty:a.old_qty??a.oldQty, newQty:a.new_qty??a.newQty, reason:a.reason, date:a.date, status:a.status })
-const mapMovement   = m => ({ id:m.id, date:m.date, type:m.type, productId:m.product_id||m.productId, qty:m.qty, from:m.from_warehouse||m.from, to:m.to_warehouse||m.to, ref:m.ref })
+const mapProduct    = p => ({ ...p, id:p.id, name:p.name, sku:p.sku, category:p.category, unit:p.unit, reorderLevel:p.reorder_level||p.reorderLevel||0, stock:p.stock||{}, createdAt:p.created_at||p.createdAt })
+const mapWarehouse  = w => ({ ...w, id:w.id, name:w.name, location:w.location, description:w.description })
+const mapReceipt    = r => ({ ...r, id:r.id, ref:r.ref, supplier:r.supplier, warehouse:r.warehouse_id||r.warehouse, status:r.status, date:r.date, notes:r.notes, items:(r.items||[]).map(i=>({ ...i, productId:i.product_id||i.productId, qty:i.qty })) })
+const mapDelivery   = d => ({ ...d, id:d.id, ref:d.ref, customer:d.customer, warehouse:d.warehouse_id||d.warehouse, status:d.status, date:d.date, notes:d.notes, items:(d.items||[]).map(i=>({ ...i, productId:i.product_id||i.productId, qty:i.qty })) })
+const mapTransfer   = t => ({ ...t, id:t.id, ref:t.ref, from:t.from_warehouse||t.from, to:t.to_warehouse||t.to, status:t.status, date:t.date, notes:t.notes, items:(t.items||[]).map(i=>({ ...i, productId:i.product_id||i.productId, qty:i.qty })) })
+const mapAdjustment = a => ({ ...a, id:a.id, ref:a.ref, productId:a.product_id||a.productId, warehouse:a.warehouse_id||a.warehouse, oldQty:a.old_qty??a.oldQty, newQty:a.new_qty??a.newQty, reason:a.reason, date:a.date, status:a.status })
+const mapMovement   = m => ({ ...m, id:m.id, date:m.date, type:m.type, productId:m.product_id||m.productId, qty:m.qty, from:m.from_warehouse||m.from||'-', to:m.to_warehouse||m.to||'-', ref:m.ref })
 
 // Role-based page access
 const ROLE_PAGES = {
@@ -42,16 +42,17 @@ export default function App() {
   const [loading,   setLoading]   = useState(true)
   const [searchOpen,setSearchOpen]= useState(false)
   const [searchQ,   setSearchQ]   = useState('')
-  const [s, d] = useReducer(reducer, INIT)
+  const [s, d] = useReducer(reducer, {products:[],warehouses:[],receipts:[],deliveries:[],transfers:[],adjustments:[],movements:[]})
 
   const loadAll = useCallback(async () => {
     try {
-      const [prods, whs, rcpts, dlvs, trfs, adjs, movs] = await Promise.all([
+      const [prods, whs, rcpts, dlvs, trfs, adjs, movs, dash] = await Promise.all([
         productsAPI.list(), warehousesAPI.list(), receiptsAPI.list(),
         deliveriesAPI.list(), transfersAPI.list(), adjustmentsAPI.list(),
-        movementsAPI.list({ limit: 200 }),
+        movementsAPI.all(), dashboardAPI.get(),
       ])
       d({ type:'HYDRATE', payload: {
+        dashboard: dash.data,
         products:    (prods.data||[]).map(mapProduct),
         warehouses:  (whs.data||[]).map(mapWarehouse),
         receipts:    (rcpts.data||[]).map(mapReceipt),
@@ -60,7 +61,10 @@ export default function App() {
         adjustments: (adjs.data||[]).map(mapAdjustment),
         movements:   (movs.data||[]).map(mapMovement),
       }})
-    } catch(err) { console.warn('API load failed:', err.message) }
+    } catch(err) {
+      if (err.status === 401) { clearToken(); setUser(null); return }
+      toast(`Unable to refresh inventory: ${err.message}`, 'e')
+    }
   }, [])
 
   useEffect(() => {
@@ -69,7 +73,7 @@ export default function App() {
       if (!token) { setLoading(false); return }
       try {
         const { user:u } = await authAPI.me()
-        const userObj = { id:u.id, name:u.name, email:u.email, role:u.role, av:u.avatar }
+        const userObj = { id:u.id, name:u.name, email:u.email, role:u.role, av:u.avatar, loginId:u.loginId, phone:u.phone }
         setUser(userObj)
         setPage('dashboard')
         await loadAll()
@@ -97,11 +101,12 @@ export default function App() {
     clearToken()
     setUser(null)
     setPage('dashboard')
-    d({ type:'HYDRATE', payload:INIT })
+    d({ type:'HYDRATE', payload:{products:[],warehouses:[],receipts:[],deliveries:[],transfers:[],adjustments:[],movements:[]} })
     toast('Logged out successfully')
   }
 
   const refresh = useCallback(() => loadAll(), [loadAll])
+  useEffect(() => { if (!user) return; const timer = setInterval(loadAll, 30000); return () => clearInterval(timer) }, [user, loadAll])
 
   const PAGES = (role) => {
     const isAdmin   = role === 'admin'
@@ -113,10 +118,10 @@ export default function App() {
       adminPanel:  isAdmin   ? <AdminPanel currentUserId={user?.id} /> : null,
       managerDash: isManager ? <ManagerDashboard s={s} refresh={refresh} /> : null,
       staffDash:   <StaffDashboard s={s} refresh={refresh} setPage={setPage} />,
-      products:    <Products    s={s} d={d} refresh={refresh} />,
-      receipts:    <Receipts    s={s} d={d} refresh={refresh} />,
-      deliveries:  <Deliveries  s={s} d={d} refresh={refresh} />,
-      transfers:   <Transfers   s={s} d={d} refresh={refresh} />,
+      products:    <Products setPage={setPage} s={s} d={d} refresh={refresh} />,
+      receipts:    <Receipts user={user} s={s} d={d} refresh={refresh} />,
+      deliveries:  <Deliveries user={user} s={s} d={d} refresh={refresh} />,
+      transfers:   <Transfers user={user} s={s} d={d} refresh={refresh} />,
       adjustments: <Adjustments s={s} d={d} refresh={refresh} />,
       history:     <History     s={s} refresh={refresh} />,
       warehouses:  <Warehouses   s={s} d={d} refresh={refresh} />,
@@ -283,6 +288,7 @@ export default function App() {
 
       {/* ── Main App Shell ── */}
       <div className="shell">
+        {mobOpen && <button className="mobile-backdrop" aria-label="Close menu" onClick={()=>setMobOpen(false)}/>}
         <Sidebar
           page={page} setPage={setPage}
           theme={theme} setTheme={setTheme}
@@ -302,9 +308,8 @@ export default function App() {
             {/* Left side: Mobile button, Breadcrumb */}
             <div className="fc g3">
               <button
-                className="btn bs bnr"
+                className="btn bs bnr mobile-menu"
                 onClick={() => setMobOpen(!mobOpen)}
-                style={{ display: 'none' }}
                 title="Toggle menu"
               >
                 <Ico n="menu" size={16}/>
