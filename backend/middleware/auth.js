@@ -1,4 +1,5 @@
 // middleware/auth.js — JWT authentication middleware
+const { secret } = require('../config')
 const jwt = require('jsonwebtoken')
 const db  = require('../db/database')
 
@@ -11,8 +12,9 @@ const auth = (req, res, next) => {
 
   const token = header.split(' ')[1]
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET)
-    const user = db.prepare('SELECT id, name, email, role, avatar FROM users WHERE id = ? AND is_active = 1').get(decoded.id)
+    const decoded = jwt.verify(token, secret)
+    const user = db.prepare('SELECT id, name, email, role, avatar, login_id, phone, token_version FROM users WHERE id = ? AND is_active = 1').get(decoded.id)
+    if (decoded.purpose !== 'session' || decoded.version !== user?.token_version) return res.status(401).json({ success:false, message:'Session expired; please sign in again' })
     if (!user) return res.status(401).json({ success: false, message: 'User not found or deactivated' })
     req.user = user
     next()
