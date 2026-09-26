@@ -3,14 +3,14 @@ import { Ico, Bdg, Modal, toast, ExportCSV, FilterPills } from '../components/UI
 import { CATS, UNITS, totalStock, stockStatus, fNum, fDate } from '../store/index.js'
 import { productsAPI } from '../api.js'
 
-export default function Products({ s, refresh }) {
+export default function Products({ s, refresh, setPage }) {
   const { products, warehouses } = s
   const [q,        setQ]        = useState('')
   const [cat,      setCat]      = useState('')
   const [statusF,  setStatusF]  = useState('all')
   const [modal,    setModal]    = useState(null)
   const [busy,     setBusy]     = useState(false)
-  const [f, setF] = useState({ name:'', sku:'', category:'Raw Materials', unit:'pieces', reorderLevel:10, description:'' })
+  const [f, setF] = useState({ name:'', sku:'', category:'Raw Materials', unit:'pieces', reorderLevel:10, description:'', unitCost:0 })
   const fh = e => setF(x => ({ ...x, [e.target.name]: e.target.value }))
 
   const filtered = products.filter(p => {
@@ -25,14 +25,14 @@ export default function Products({ s, refresh }) {
   const countLow = products.filter(p => stockStatus(p)==='low').length
   const countOut = products.filter(p => stockStatus(p)==='out').length
 
-  const openAdd  = () => { setF({ name:'', sku:'', category:'Raw Materials', unit:'pieces', reorderLevel:10, description:'' }); setModal('add') }
-  const openEdit = p  => { setF({ name:p.name, sku:p.sku, category:p.category, unit:p.unit, reorderLevel:p.reorderLevel, description:p.description||'' }); setModal({ edit:p }) }
+  const openAdd  = () => { setF({ name:'', sku:'', category:'Raw Materials', unit:'pieces', reorderLevel:10, description:'', unitCost:0 }); setModal('add') }
+  const openEdit = p  => { setF({ name:p.name, sku:p.sku, category:p.category, unit:p.unit, reorderLevel:p.reorderLevel, description:p.description||'', unitCost:p.unit_cost||0 }); setModal({ edit:p }) }
 
   const save = async () => {
     if (!f.name || !f.sku) return toast('Name and SKU required','e')
     setBusy(true)
     try {
-      const payload = { name:f.name, sku:f.sku, category:f.category, unit:f.unit, reorderLevel:Number(f.reorderLevel), description:f.description }
+      const payload = { name:f.name, sku:f.sku, category:f.category, unit:f.unit, reorderLevel:Number(f.reorderLevel), description:f.description, unitCost:Number(f.unitCost) }
       if (modal==='add') { await productsAPI.create(payload); toast('Product catalog item created!') }
       else               { await productsAPI.update(modal.edit.id, payload); toast('Product updated successfully!') }
       setModal(null); await refresh()
@@ -62,7 +62,7 @@ export default function Products({ s, refresh }) {
             filename="products_catalog.csv"
             title="Export Products"
           />
-          <button className="btn bp" onClick={openAdd}><Ico n="plus" size={14}/>New Product</button>
+          <button className="btn bs" onClick={()=>setPage('adjustments')}>Update stock / Adjustment</button><button className="btn bp" onClick={openAdd}><Ico n="plus" size={14}/>New Product</button>
         </div>
       </div>
 
@@ -105,7 +105,7 @@ export default function Products({ s, refresh }) {
               <th>Product SKU</th>
               <th>Category</th>
               <th>Unit</th>
-              <th style={{ textAlign: 'right' }}>Total Stock</th>
+              <th>Unit Cost (INR)</th><th>Free To Use</th><th style={{ textAlign: 'right' }}>On Hand</th>
               <th>Status</th>
               <th style={{ textAlign: 'right' }}>Reorder Level</th>
               <th>Registered</th>
@@ -128,6 +128,7 @@ export default function Products({ s, refresh }) {
                     </span>
                   </td>
                   <td style={{ color: 'var(--t2)', fontSize: 12 }}>{p.unit}</td>
+                  <td className="mono">{fNum(p.unit_cost)}</td><td className="mono">{fNum(p.freeToUse ?? tot)}</td>
                   <td className="mono" style={{ textAlign: 'right', fontWeight: 800, fontSize: 13.5, color: 'var(--t0)' }}>
                     {fNum(tot)} <span style={{ fontSize: 10.5, color: 'var(--t2)', fontWeight: 400 }}>{p.unit}</span>
                   </td>
@@ -138,6 +139,7 @@ export default function Products({ s, refresh }) {
                   <td className="mono" style={{ fontSize: 11, color: 'var(--t2)' }}>
                     {fDate(p.createdAt)}
                   </td>
+
                   <td style={{ textAlign: 'right' }}>
                     <div className="fc g2" style={{ justifyContent: 'flex-end' }}>
                       <button className="btn bs bnr bsm" onClick={()=>openEdit(p)} title="Edit product"><Ico n="edit" size={13}/></button>
@@ -149,7 +151,7 @@ export default function Products({ s, refresh }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={10}>
                   <div className="empty" style={{ padding: 48 }}>
                     <Ico n="box" size={36} color="var(--b1)"/>
                     <span style={{ color: 'var(--t0)', fontWeight: 700, marginTop: 8 }}>No products found</span>
@@ -202,6 +204,7 @@ export default function Products({ s, refresh }) {
               </select>
             </div>
           </div>
+          <div className="fg"><label className="lbl">Per Unit Cost (INR)</label><input className="inp" name="unitCost" type="number" min="0" step="0.01" value={f.unitCost} onChange={fh}/></div>
           <div className="grid2">
             <div className="fg">
               <label className="lbl">Reorder Safety Level</label>
