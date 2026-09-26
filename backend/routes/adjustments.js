@@ -46,7 +46,7 @@ router.get('/:id', auth, (req, res) => {
 router.post('/', auth, managerOrAdmin, [
   body('productId').notEmpty().withMessage('Product required'),
   body('warehouseId').notEmpty().withMessage('Warehouse required'),
-  body('newQty').isInt({ min: 0 }).withMessage('New quantity must be 0 or more'),
+  body('newQty').isInt({ min: 0, max: 1000000000 }).withMessage('New quantity must be 0 or more'),
   body('reason').trim().notEmpty().withMessage('Reason for adjustment required'),
 ], (req, res) => {
   const errors = validationResult(req)
@@ -70,7 +70,7 @@ router.post('/', auth, managerOrAdmin, [
     return res.status(400).json({ success: false, message: `No change: current stock is already ${oldQty}` })
   }
 
-  const ref = nextRef(db, 'adjustments', 'ref', 'ADJ')
+  const ref = nextRef(db, 'adjustments', 'ref', 'ADJ', warehouseId)
   const id  = uuidv4()
 
   // Run in transaction
@@ -96,6 +96,7 @@ router.post('/', auth, managerOrAdmin, [
     })
   })()
 
+  require('../utils/inventory').refreshAvailability()
   const adj = db.prepare('SELECT * FROM adjustments WHERE id = ?').get(id)
   res.status(201).json({
     success: true,
