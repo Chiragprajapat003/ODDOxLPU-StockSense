@@ -52,7 +52,7 @@ const FEATURES = [
   { icon: 'shield',    title: 'Enterprise RBAC',         desc: 'Granular role-based access for Admins, Managers, and Warehouse Floor Staff.', color: 'var(--gn)' },
   { icon: 'send',      title: 'Double-Entry Ledger',      desc: 'Immutable audit trail for every incoming receipt, outgoing delivery, and transfer.', color: 'var(--am)' },
   { icon: 'refresh',   title: 'Instant Adjustments',     desc: 'Automated physical count reconciliation with delta tracking and audit reasons.', color: 'var(--rd)' },
-  { icon: 'lock',      title: 'Secure JWT & OTP Reset',  desc: 'Bank-grade authentication with email/dev-mode OTP verification and encrypted sessions.', color: 'var(--cy)' },
+  { icon: 'lock',      title: 'Secure JWT & OTP Reset',  desc: 'Secure authentication with email and verified WhatsApp OTP recovery.', color: 'var(--cy)' },
 ]
 
 export default function Landing({ onSelectRole }) {

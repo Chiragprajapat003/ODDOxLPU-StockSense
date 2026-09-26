@@ -16,7 +16,7 @@ export default function Auth({ onLogin }) {
   const [busy,   setBusy]  = useState(false)
   const [showPass, setShowPass] = useState(false)
   const [resetToken, setResetToken] = useState('')
-  const [f, setF] = useState({ email:'', password:'', name:'', otp:'', newPass:'' })
+  const [f, setF] = useState({ email:'', password:'', name:'', loginId:'', confirmPassword:'', phone:'', channel:'email', otp:'', newPass:'' })
   const h = e => setF(x => ({ ...x, [e.target.name]: e.target.value }))
 
   const handleSelectRole = (roleKey) => {
@@ -37,28 +37,27 @@ export default function Auth({ onLogin }) {
     setBusy(true)
     try {
       if (view === 'login') {
-        if (!f.email || !f.password) { toast('Please fill in both email and password', 'e'); return }
+        if (!f.email || !f.password) { toast('Please fill in Login ID and password', 'e'); return }
         const res = await authAPI.login(f.email, f.password)
-        onLogin({ id:res.user.id, name:res.user.name, email:res.user.email, role:res.user.role, av:res.user.avatar }, res.token)
+        onLogin({ id:res.user.id, name:res.user.name, email:res.user.email, role:res.user.role, av:res.user.avatar, loginId:res.user.loginId, phone:res.user.phone }, res.token)
       } else if (view === 'signup') {
         if (!f.name || !f.email || !f.password) { toast('Please fill in all fields', 'e'); return }
-        const res = await authAPI.signup(f.name, f.email, f.password)
-        onLogin({ id:res.user.id, name:res.user.name, email:res.user.email, role:res.user.role, av:res.user.avatar }, res.token)
+        const res = await authAPI.signup({name:f.name,email:f.email,password:f.password,confirmPassword:f.confirmPassword,loginId:f.loginId})
+        onLogin({ id:res.user.id, name:res.user.name, email:res.user.email, role:res.user.role, av:res.user.avatar, loginId:res.user.loginId, phone:res.user.phone }, res.token)
       } else {
         if (step === 1) {
-          if (!f.email) { toast('Enter your registered email', 'e'); return }
-          const res = await authAPI.sendOtp(f.email)
+          if (f.channel === 'email' ? !f.email : !f.phone) { toast('Enter your registered email or linked WhatsApp number', 'e'); return }
+          const res = await authAPI.sendOtp({email:f.email,phone:f.phone,channel:f.channel})
           toast(res.message || 'OTP sent to your email!', 's')
-          if (res.devOtp) toast('DEV OTP CODE: ' + res.devOtp, 'w')
           setStep(2)
         } else if (step === 2) {
           if (!f.otp) { toast('Enter the 6-digit OTP', 'e'); return }
-          const res = await authAPI.verifyOtp(f.email, f.otp)
+          const res = await authAPI.verifyOtp({email:f.email,phone:f.phone,channel:f.channel,code:f.otp})
           setResetToken(res.resetToken)
           toast('OTP verified successfully! Set a new password.')
           setStep(3)
         } else {
-          if (!f.newPass || f.newPass.length < 6) { toast('Password must be at least 6 characters', 'e'); return }
+          if (!f.newPass || !/(?=.*[a-z])(?=.*[A-Z])(?=.*[^a-zA-Z0-9\s]).{9,}/.test(f.newPass)) { toast('Use 9+ characters with uppercase, lowercase and a special character', 'e'); return }
           await authAPI.resetPass(resetToken, f.newPass)
           toast('Password reset successfully! Please sign in.')
           setView('login'); setStep(1)
@@ -160,14 +159,14 @@ export default function Auth({ onLogin }) {
         {view === 'login' && (
           <>
             <div className="fg">
-              <label className="lbl">Email Address</label>
+              <label className="lbl">Login ID or Email</label>
               <input
                 className="inp"
                 name="email"
-                type="email"
+                type="text"
                 value={f.email}
                 onChange={h}
-                placeholder="user@coreinventory.com"
+                placeholder="Login ID or email"
               />
             </div>
 
@@ -215,7 +214,7 @@ export default function Auth({ onLogin }) {
             </button>
 
             {/* Quick 1-Click Demo Accounts */}
-            <div style={{
+            {(import.meta.env.DEV || import.meta.env.VITE_ENABLE_DEMO === 'true') && <div style={{
               marginTop: 18, padding: '12px 14px', background: 'var(--bg0)',
               borderRadius: 10, border: '1px solid var(--b0)'
             }}>
@@ -243,7 +242,7 @@ export default function Auth({ onLogin }) {
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
           </>
         )}
 
@@ -251,6 +250,8 @@ export default function Auth({ onLogin }) {
         {view === 'signup' && (
           <>
             <div className="fg">
+              <label className="lbl">Login ID (6–12 characters)</label><input className="inp" name="loginId" value={f.loginId} onChange={h} minLength={6} maxLength={12} autoComplete="username"/>
+            </div><div className="fg">
               <label className="lbl">Full Name</label>
               <input className="inp" name="name" value={f.name} onChange={h} placeholder="e.g. Alex Morgan"/>
             </div>
@@ -260,8 +261,9 @@ export default function Auth({ onLogin }) {
             </div>
             <div className="fg">
               <label className="lbl">Password</label>
-              <input className="inp" name="password" type="password" value={f.password} onChange={h} placeholder="Min 6 characters" onKeyDown={e=>e.key==='Enter'&&submit()}/>
+              <input className="inp" name="password" type="password" value={f.password} onChange={h} placeholder="9+ chars, upper/lowercase and special character" onKeyDown={e=>e.key==='Enter'&&submit()}/>
             </div>
+            <div className="fg"><label className="lbl">Confirm Password</label><input className="inp" name="confirmPassword" type="password" value={f.confirmPassword} onChange={h}/></div>
             <button
               className="btn bp"
               style={{ width: '100%', justifyContent: 'center', padding: 11, fontSize: 13.5 }}
@@ -283,8 +285,8 @@ export default function Auth({ onLogin }) {
               Reset Password
             </div>
             <div style={{ fontSize: 12, color: 'var(--t2)', marginBottom: 16 }}>
-              {step===1 && 'Enter your registered email to receive a secure OTP code.'}
-              {step===2 && `Enter the 6-digit OTP sent to ${f.email}`}
+              {step===1 && 'Choose email or a previously verified WhatsApp recovery number.'}
+              {step===2 && `Enter the 6-digit OTP for ${f.channel === 'email' ? f.email : f.phone}`}
               {step===3 && 'Choose a strong new password for your account.'}
             </div>
 
@@ -305,8 +307,9 @@ export default function Auth({ onLogin }) {
 
             {step===1 && (
               <div className="fg">
-                <label className="lbl">Registered Email</label>
-                <input className="inp" name="email" type="email" value={f.email} onChange={h} placeholder="user@coreinventory.com"/>
+                <label className="lbl">Recovery method</label><select className="inp" name="channel" value={f.channel} onChange={h}><option value="email">Email</option><option value="whatsapp">WhatsApp</option></select>
+                <label className="lbl" style={{marginTop:12}}>{f.channel === 'email' ? 'Registered Email' : 'Verified WhatsApp number'}</label>
+                {f.channel === 'email' ? <input className="inp" name="email" type="email" value={f.email} onChange={h} placeholder="you@example.com"/> : <><input className="inp" name="phone" type="tel" value={f.phone} onChange={h} placeholder="+919876543210"/><p>Link and verify your number in Profile before using WhatsApp recovery.</p></>}
               </div>
             )}
 
@@ -326,10 +329,11 @@ export default function Auth({ onLogin }) {
               </div>
             )}
 
+            {step===2 && <button className="btn bs bsm" onClick={()=>{setStep(1);setF(x=>({...x,otp:''}))}}>Request a new code / change method</button>}
             {step===3 && (
               <div className="fg">
                 <label className="lbl">New Password</label>
-                <input className="inp" name="newPass" type="password" value={f.newPass} onChange={h} placeholder="Min 6 characters" onKeyDown={e=>e.key==='Enter'&&submit()}/>
+                <input className="inp" name="newPass" type="password" value={f.newPass} onChange={h} placeholder="9+ chars, upper/lowercase and special character" onKeyDown={e=>e.key==='Enter'&&submit()}/>
               </div>
             )}
 
