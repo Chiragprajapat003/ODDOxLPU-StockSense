@@ -13,11 +13,11 @@ const db = new DatabaseSync(dbFile)
 
 // WAL mode + foreign keys
 // WAL mode removed for node:sqlite compat — using default DELETE mode
-db.exec("PRAGMA foreign_keys = ON")
+db.exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL")
 
 // ── transaction() shim matching better-sqlite3 API ───────────────────────────
 db.transaction = (fn) => (...args) => {
-  db.exec('BEGIN')
+  db.exec('BEGIN IMMEDIATE')
   try {
     const result = fn(...args)
     db.exec('COMMIT')
@@ -186,4 +186,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_otp_email             ON otp_codes(email);
 `)
 
+// Preserve an on-disk snapshot before the first migration of an existing database.
+if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'login_id') && db.prepare('SELECT COUNT(*) AS n FROM users').get().n > 0) {
+  const fs = require('fs')
+  const backupDir = path.join(path.dirname(dbFile), 'backups')
+  fs.mkdirSync(backupDir, { recursive:true })
+  const backupFile = path.join(backupDir, `before-workflow-${Date.now()}.db`)
+  db.prepare('VACUUM INTO ?').run(backupFile)
+  console.log('Pre-migration database backup saved:', backupFile)
+}
+require('./migrate')(db)
 module.exports = db

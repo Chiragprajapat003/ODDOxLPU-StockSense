@@ -6,13 +6,12 @@ const { v4: uuidv4 } = require('uuid')
 
 console.log('🌱  Seeding CoreInventory database...')
 
-// ─── Clear existing data ──────────────────────────────────────────────────────
-const tables = [
-  'stock_movements','adjustments','transfer_items','transfers',
-  'delivery_items','deliveries','receipt_items','receipts',
-  'product_stock','products','warehouses','otp_codes','users'
-]
-tables.forEach(t => db.prepare(`DELETE FROM ${t}`).run())
+// Demo seed is intentionally non-destructive and cannot run in production.
+if (process.env.NODE_ENV === 'production') throw new Error('Demo seeding is disabled in production')
+if (db.prepare('SELECT COUNT(*) AS n FROM users').get().n || db.prepare('SELECT COUNT(*) AS n FROM products').get().n || db.prepare('SELECT COUNT(*) AS n FROM warehouses').get().n) {
+  console.log('Database contains data; seed skipped. Existing records are preserved.')
+  process.exit(0)
+}
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 const adminHash = bcrypt.hashSync('admin123', 10)
@@ -144,3 +143,10 @@ console.log('   Default accounts:')
 console.log('   admin@coreinventory.com   / admin123  (admin)')
 console.log('   manager@coreinventory.com / manager123 (manager)')
 console.log('   staff@coreinventory.com   / staff123  (warehouse_staff)')
+
+// Refresh demo dates only while creating a new demo database.
+const seedAnchor = new Date('2024-01-28T00:00:00Z')
+const today = new Date(); today.setUTCHours(0,0,0,0)
+const shift = Math.floor((today-seedAnchor)/86400000)
+for (const table of ['receipts','deliveries','transfers','adjustments','stock_movements']) db.prepare(`UPDATE ${table} SET date = date(date, ?)`).run(`${shift} days`)
+require('./migrate')(db)
